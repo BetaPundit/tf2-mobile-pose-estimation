@@ -15,21 +15,24 @@
 
 from __future__ import absolute_import, division, print_function
 
+from evaluate import calculate_total_pckh
+from save_result_as_image import save_result_image
+from configparser import ConfigParser
+import getopt
+import sys
+from common import get_time_and_step_interval
+import numpy as np
 import os
 import datetime
 
 import tensorflow as tf
 tf.random.set_seed(3)
-import numpy as np
 
-from common import get_time_and_step_interval
 
-print("tensorflow version   :", tf.__version__) # 2.1.0
-print("keras version        :", tf.keras.__version__) # 2.2.4-tf
+print("tensorflow version   :", tf.__version__)  # 2.1.0
+print("keras version        :", tf.keras.__version__)  # 2.2.4-tf
 
-import sys
-import getopt
-from configparser import ConfigParser
+strategy = tf.distribute.TPUStrategy(resolver)
 
 """
 python train.py --dataset_config=config/dataset/coco2017-gpu.cfg --experiment_config=config/training/experiment01.cfg
@@ -39,13 +42,14 @@ python train.py --dataset_config=config/dataset/ai_challenger-gpu.cfg --experime
 argv = sys.argv[1:]
 
 try:
-    opts, args = getopt.getopt(argv, "d:e:", ["dataset_config=", "experiment_config="])
+    opts, args = getopt.getopt(
+        argv, "d:e:", ["dataset_config=", "experiment_config="])
 except getopt.GetoptError:
     print('train_hourglass.py --dataset_config <inputfile> --experiment_config <outputfile>')
     sys.exit(2)
 
-dataset_config_file_path = "config/dataset/coco2017-gpu.cfg"
-experiment_config_file_path = "config/training/experiment01.cfg"
+dataset_config_file_path = "config/dataset/ai_challenger-colab.cfg"
+experiment_config_file_path = "config/training/experiment04-cpm-sg4-colab.cfg"
 for opt, arg in opts:
     if opt == '-h':
         print('train_middlelayer.py --dataset_config <inputfile> --experiment_config <outputfile>')
@@ -84,18 +88,22 @@ config_output = {}
 for key in parser["output"]:
     config_output[key] = eval(parser["output"][key])
 
-dataset_root_path = config_dataset["dataset_root_path"]  # "/Volumes/tucan-SSD/datasets"
-dataset_directory_name = config_dataset["dataset_directory_name"]  # "coco_dataset"
+# "/Volumes/tucan-SSD/datasets"
+dataset_root_path = config_dataset["dataset_root_path"]
+# "coco_dataset"
+dataset_directory_name = config_dataset["dataset_directory_name"]
 dataset_path = os.path.join(dataset_root_path, dataset_directory_name)
 
-output_root_path = config_output["output_root_path"]  # "/home/outputs"  # "/Volumes/tucan-SSD/ml-project/outputs"
+# "/home/outputs"  # "/Volumes/tucan-SSD/ml-project/outputs"
+output_root_path = config_output["output_root_path"]
 output_experiment_name = config_output["experiment_name"]  # "experiment01"
 sub_experiment_name = config_output["sub_experiment_name"]  # "basic"
 current_time = datetime.datetime.now().strftime("%m%d%H%M")
 model_name = config_model["model_name"]  # "simplepose"
 model_subname = config_model["model_subname"]
 output_name = f"{current_time}_{model_name}_{sub_experiment_name}"
-output_path = os.path.join(output_root_path, output_experiment_name, dataset_directory_name)
+output_path = os.path.join(
+    output_root_path, output_experiment_name, dataset_directory_name)
 output_log_path = os.path.join(output_path, "logs", output_name)
 
 # =================================================
@@ -104,12 +112,14 @@ output_log_path = os.path.join(output_path, "logs", output_name)
 
 train_summary_writer = tf.summary.create_file_writer(output_log_path)
 
+
 @tf.function
 def train_step(model, images, labels):
     with tf.GradientTape() as tape:
         model_output = model(images)
         predictions_layers = model_output
-        losses = [loss_object(labels, predictions) for predictions in predictions_layers]
+        losses = [loss_object(labels, predictions)
+                  for predictions in predictions_layers]
         total_loss = tf.math.add_n(losses)
 
     max_val = tf.math.reduce_max(predictions_layers[-1])
@@ -119,14 +129,12 @@ def train_step(model, images, labels):
     train_loss(total_loss)
     return total_loss, losses[-1], max_val
 
-from save_result_as_image import save_result_image
 
 def val_step(step, images, heamaps):
     predictions = model(images, training=False)
     predictions = np.array(predictions)
     save_image_results(step, images, heamaps, predictions)
 
-from evaluate import calculate_total_pckh
 
 @tf.function
 def valid_step(model, images, labels):
@@ -136,6 +144,7 @@ def valid_step(model, images, labels):
     # valid_accuracy(labels, predictions)
     return v_loss
 
+
 def save_image_results(step, images, true_heatmaps, predicted_heatmaps):
     val_image_results_directory = "val_image_results"
 
@@ -144,7 +153,8 @@ def save_image_results(step, images, true_heatmaps, predicted_heatmaps):
     if not os.path.exists(os.path.join(output_path, output_name)):
         os.mkdir(os.path.join(output_path, output_name))
     if not os.path.exists(os.path.join(output_path, output_name, val_image_results_directory)):
-        os.mkdir(os.path.join(output_path, output_name, val_image_results_directory))
+        os.mkdir(os.path.join(output_path, output_name,
+                              val_image_results_directory))
 
     for i in range(images.shape[0]):
         image = images[i, :, :, :]
@@ -152,9 +162,12 @@ def save_image_results(step, images, true_heatmaps, predicted_heatmaps):
         prediction = predicted_heatmaps[-1][i, :, :, :]
 
         # result_image = display(i, image, heamap, prediction)
-        result_image_path = os.path.join(output_path, output_name, val_image_results_directory, f"result{i}-{step:0>6d}.jpg")
-        save_result_image(result_image_path, image, heamap, prediction, title=f"step:{int(step/1000)}k")
+        result_image_path = os.path.join(
+            output_path, output_name, val_image_results_directory, f"result{i}-{step:0>6d}.jpg")
+        save_result_image(result_image_path, image, heamap,
+                          prediction, title=f"step:{int(step/1000)}k")
         # print("val_step: save result image on \"" + result_image_path + "\"")
+
 
 def save_model(model, step=None, label=None):
     saved_model_directory = "saved_model"
@@ -170,7 +183,8 @@ def save_model(model, step=None, label=None):
     if not os.path.exists(os.path.join(output_path, output_name, saved_model_directory)):
         os.mkdir(os.path.join(output_path, output_name, saved_model_directory))
 
-    saved_model_path = os.path.join(output_path, output_name, saved_model_directory)
+    saved_model_path = os.path.join(
+        output_path, output_name, saved_model_directory)
 
     print("-"*20 + " MODEL SAVE!! " + "-"*20)
     print("saved model path: " + saved_model_path)
@@ -178,6 +192,7 @@ def save_model(model, step=None, label=None):
     print("-"*18 + " MODEL SAVE DONE!! " + "-"*18)
 
     return saved_model_path
+
 
 if __name__ == '__main__':
     # ================================================
@@ -196,7 +211,8 @@ if __name__ == '__main__':
     train_images = config_dataset["train_images"]
     train_annotation = config_dataset["train_annotation"]
     train_images_dir_path = os.path.join(dataset_path, train_images)
-    train_annotation_json_filepath = os.path.join(dataset_path, train_annotation)
+    train_annotation_json_filepath = os.path.join(
+        dataset_path, train_annotation)
     print(">> LOAD TRAIN DATASET FORM:", train_annotation_json_filepath)
     dataloader_train = DataLoader(
         images_dir_path=train_images_dir_path,
@@ -208,7 +224,8 @@ if __name__ == '__main__':
     valid_images = config_dataset["valid_images"]
     valid_annotation = config_dataset["valid_annotation"]
     valid_images_dir_path = os.path.join(dataset_path, valid_images)
-    valid_annotation_json_filepath = os.path.join(dataset_path, valid_annotation)
+    valid_annotation_json_filepath = os.path.join(
+        dataset_path, valid_annotation)
     print(">> LOAD VALID DATASET FORM:", valid_annotation_json_filepath)
     dataloader_valid = DataLoader(
         images_dir_path=valid_images_dir_path,
@@ -224,7 +241,8 @@ if __name__ == '__main__':
     dataset_valid = dataloader_valid.input_fn()
 
     # validation images
-    val_images, val_heatmaps = dataloader_valid.get_images(0, batch_size=25)  # from 22 index 6 images and 6 labels
+    val_images, val_heatmaps = dataloader_valid.get_images(
+        0, batch_size=25)  # from 22 index 6 images and 6 labels
 
     # ================================================
     # =============== build model ====================
@@ -236,10 +254,12 @@ if __name__ == '__main__':
                       config_extra=config_extra)
 
     loss_object = tf.keras.losses.MeanSquaredError()
-    optimizer = tf.keras.optimizers.Adam(config_training["learning_rate"], epsilon=config_training["epsilon"])
+    optimizer = tf.keras.optimizers.Adam(
+        config_training["learning_rate"], epsilon=config_training["epsilon"])
     train_loss = tf.keras.metrics.Mean(name="train_loss")
     valid_loss = tf.keras.metrics.Mean(name="valid_loss")
-    valid_accuracy = tf.keras.metrics.SparseCategoricalAccuracy(name="valid_accuracy")
+    valid_accuracy = tf.keras.metrics.SparseCategoricalAccuracy(
+        name="valid_accuracy")
 
     # ================================================
     # ============== train the model =================
@@ -265,12 +285,14 @@ if __name__ == '__main__':
 
             # print(images.shape)  # (32, 128, 128, 3)
             # print(heatmaps.shape)  # (32, 32, 32, 17)
-            total_loss, last_layer_loss, max_val = train_step(model, images, heatmaps)
+            total_loss, last_layer_loss, max_val = strategy.run(
+                train_step, args=(model, images, heatmaps))
 
             step += 1
 
             if number_of_echo_period is not None and step % number_of_echo_period == 0:
-                total_interval, per_step_interval = get_time_and_step_interval(step)
+                total_interval, per_step_interval = get_time_and_step_interval(
+                    step)
                 echo_textes = []
                 if step is not None:
                     echo_textes.append(f"step: {step}")
@@ -298,22 +320,24 @@ if __name__ == '__main__':
                                                       images_path=valid_images_dir_path,
                                                       distance_ratio=pckh_distance_ratio)
                     with train_summary_writer.as_default():
-                        tf.summary.scalar(f'pckh@{pckh_distance_ratio:.1f}_score', pckh_score * 100, step=step)
+                        tf.summary.scalar(
+                            f'pckh@{pckh_distance_ratio:.1f}_score', pckh_score * 100, step=step)
 
             if tensorbaord_period is not None and step % tensorbaord_period == 0:
                 with train_summary_writer.as_default():
-                    tf.summary.scalar("total_loss", total_loss.numpy(), step=step)
-                    tf.summary.scalar("max_value - last_layer_loss", max_val.numpy(), step=step)
+                    tf.summary.scalar(
+                        "total_loss", total_loss.numpy(), step=step)
+                    tf.summary.scalar(
+                        "max_value - last_layer_loss", max_val.numpy(), step=step)
                     if last_layer_loss is not None:
-                        tf.summary.scalar("last_layer_loss", last_layer_loss.numpy(), step=step)
+                        tf.summary.scalar("last_layer_loss",
+                                          last_layer_loss.numpy(), step=step)
 
         # if not valid_check:
         #     continue
 
         # for v_images, v_heatmaps in dataloader_valid:
         #     v_loss = valid_step(model, sv_images, v_heatmaps)
-
-
 
     # last model save
     saved_model_path = save_model(model, step=step, label="final")
@@ -324,4 +348,5 @@ if __name__ == '__main__':
                                       images_path=valid_images_dir_path,
                                       distance_ratio=pckh_distance_ratio)
     with train_summary_writer.as_default():
-        tf.summary.scalar(f'pckh@{pckh_distance_ratio:.1f}_score', pckh_score * 100, step=step)
+        tf.summary.scalar(
+            f'pckh@{pckh_distance_ratio:.1f}_score', pckh_score * 100, step=step)
