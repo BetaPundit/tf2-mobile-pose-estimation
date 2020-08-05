@@ -26,8 +26,14 @@ import os
 import datetime
 
 import tensorflow as tf
-tf.random.set_seed(3)
 
+resolver = tf.distribute.cluster_resolver.TPUClusterResolver(tpu='grpc://' + os.environ['COLAB_TPU_ADDR'])
+tf.config.experimental_connect_to_cluster(resolver)
+# This is the TPU initialization code that has to be at the beginning.
+tf.tpu.experimental.initialize_tpu_system(resolver)
+print("All devices: ", tf.config.list_logical_devices('TPU'))
+
+tf.random.set_seed(3)
 
 print("tensorflow version   :", tf.__version__)  # 2.1.0
 print("keras version        :", tf.keras.__version__)  # 2.2.4-tf
