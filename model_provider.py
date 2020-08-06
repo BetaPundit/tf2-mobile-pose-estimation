@@ -14,11 +14,14 @@
 # -*- coding: utf-8 -*-
 
 import os
+import tensorflow as tf
 
-TPU_WORKER = 'grpc://' + os.environ['COLAB_TPU_ADDR']
+resolver = tf.distribute.cluster_resolver.TPUClusterResolver(tpu='grpc://' + os.environ['COLAB_TPU_ADDR'])
+tf.config.experimental_connect_to_cluster(resolver)
+# This is the TPU initialization code that has to be at the beginning.
+tf.tpu.experimental.initialize_tpu_system(resolver)
 
-strategy = tf.contrib.tpu.TPUDistributionStrategy(
-    tf.contrib.cluster_resolver.TPUClusterResolver(TPU_WORKER))
+strategy = tf.distribute.TPUStrategy(resolver)
 
 
 """
@@ -78,11 +81,11 @@ def _get_simplepose_model(model_subname="", number_of_keypoints=14, config_extra
 def _get_cpm_model(model_subname="", number_of_keypoints=14, config_extra={}):
     from models import mv2_cpm
     number_of_stages = config_extra["number_of_stages"]
-    model = mv2_cpm.ConvolutionalPoseMachine(
-        number_of_keypoints=number_of_keypoints, number_of_stages=number_of_stages)
-    tpu_model = tf.contrib.tpu.keras_to_tpu_model(model, strategy=strategy)
+    with strategy.scope():
+        model = mv2_cpm.ConvolutionalPoseMachine(
+            number_of_keypoints=number_of_keypoints, number_of_stages=number_of_stages)
 
-    return tpu_model
+    return model
 
 
 def _get_hourglass_model(model_subname="", number_of_keypoints=14, config_extra={}):
